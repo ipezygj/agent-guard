@@ -1,0 +1,8 @@
+# Render Blueprint: agent-guard MCP server over HTTP (/mcp) — no config, no secrets, pure safety checks.
+services:
+  - type: web
+    name: agent-guard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health

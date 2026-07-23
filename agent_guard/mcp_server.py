@@ -9,13 +9,24 @@ an agent's reasoning: the descriptions say exactly when to call.
 Run:  python -m agent_guard.mcp_server        (stdio MCP server)
 Requires: mcp  (pip install "agent-guard[mcp]").  The checks are dependency-free.
 """
+import os
+
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from . import checks as C
 from . import registry as R
 from . import webscan as W
 
+# DNS-rebinding protection guards LOCALHOST servers; this ships as a PUBLIC HTTP MCP server (Render/Smithery),
+# and every tool is pure, read-only computation with no local/privileged access — so the Host allowlist would
+# only reject legitimate traffic. Off by default; set AGENT_GUARD_MCP_HOSTS (comma-separated) for a strict one.
+_hosts = [h.strip() for h in os.environ.get("AGENT_GUARD_MCP_HOSTS", "").split(",") if h.strip()]
+_security = (TransportSecuritySettings(allowed_hosts=_hosts, allowed_origins=_hosts)
+             if _hosts else TransportSecuritySettings(enable_dns_rebinding_protection=False))
+
 mcp = FastMCP(
     "agent-guard",
+    transport_security=_security,
     instructions=(
         "Safety checks an agent runs BEFORE an irreversible or risky step. CALL A TOOL HERE WHENEVER "
         "you are about to:\n"
