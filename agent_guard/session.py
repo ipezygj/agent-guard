@@ -39,6 +39,7 @@ _SENSITIVE_SOURCE = [
     (r'\.ssh/(id_\w+|identity)\b', "SSH private key"),
     (r'\bid_(rsa|ed25519|ecdsa|dsa)\b', "SSH private key"),
     (r'-----BEGIN [A-Z ]*PRIVATE KEY-----', "private key material"),
+    (r'\.(pem|key|p12|pfx|keystore|jks)\b', "private key / certificate file"),
     (r'(^|/|\\)\.env(\.\w+)?\b', ".env secrets file"),
     (r'\.aws[/\\]credentials\b', "AWS credentials"),
     (r'\.config[/\\]gcloud\b', "gcloud credentials"),
@@ -53,6 +54,9 @@ _SENSITIVE_SOURCE = [
     (r'\bsecring\.(gpg|pgp)\b', "PGP secret keyring"),
     (r'Login Data\b|login\.keychain\b', "browser / OS credential store"),
     (r'\b(private|secret)[_-]?key\b', "named secret/private key"),
+    # a secret held in an ENV VAR read by name (printenv/echo $X) — CI secrets live here, not in files
+    (r'\b[A-Z][A-Z0-9]*_?(SECRET|TOKEN|PASSWORD|PASSWD|APIKEY|API_KEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)[A-Z0-9_]*\b',
+     "named secret environment variable"),
 ]
 _SENSITIVE_SOURCE = [(re.compile(p, re.IGNORECASE), lbl) for p, lbl in _SENSITIVE_SOURCE]
 
@@ -65,7 +69,7 @@ _ENCODERS = re.compile(
 
 # Tools / URL schemes that send bytes OFF the machine.
 _EGRESS_TOOL = re.compile(
-    r'\b(curl|wget|nc|ncat|netcat|telnet|scp|sftp|rsync|ftp|tftp|socat|http\.client|urllib|requests\.(get|post|put)|Invoke-WebRequest|Invoke-RestMethod|iwr|wget\.exe)\b',
+    r'\b(curl|wget|nc|ncat|netcat|telnet|scp|sftp|rsync|ftp|tftp|socat|http\.client|urllib|requests\.(get|post|put)|Invoke-WebRequest|Invoke-RestMethod|iwr|wget\.exe|nslookup|dig|drill|doh)\b',
     re.IGNORECASE)
 
 # Hosts that are ALWAYS an exfil sink no matter the allowlist — pastebins, one-shot file drops, webhook

@@ -102,3 +102,14 @@ def test_receipt_signs_and_detects_tamper():
     bad["payload"]["verdict"]["decision"] = "allow"
     assert not verify_receipt(bad, hmac_secret_hex=secret)
     assert r["payload"]["issuer"] == "agent-guard" and r["payload"]["verdict"]["decision"] == "block"
+
+
+def test_benchmark_efficacy_thresholds():
+    # the guard's measured efficacy is a REGRESSION GATE, not a one-off claim: it must catch every
+    # attack pattern it models, keep a zero false-positive rate on the benign corpus, and stay high
+    # overall. If a change regresses detection or starts crying wolf, this fails.
+    from agent_guard.bench import run
+    r = run(verbose=False)
+    assert r["recall_modeled"] == 1.0, f"missed a modeled attack: {r['missed']}"
+    assert r["fp_rate"] == 0.0, f"false positives appeared: {r['fp']}"
+    assert r["recall"] >= 0.9, f"overall recall regressed to {r['recall']:.0%}"
