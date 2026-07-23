@@ -10,15 +10,53 @@ Run:  python -m agent_guard.mcp_server        (stdio MCP server)
 Requires: mcp  (pip install "agent-guard[mcp]").  The checks are dependency-free.
 """
 import os
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 from . import checks as C
 from . import registry as R
 from . import webscan as W
+
+
+class _Out(BaseModel):
+    """Base output model. `extra="allow"` so declaring the schema never drops fields from the actual result;
+    every field is optional so an unusual return path can't fail structured-output validation."""
+    model_config = ConfigDict(extra="allow")
+
+
+class PackageCheck(_Out):
+    package: Optional[str] = None
+    ecosystem: Optional[str] = None
+    risk: Annotated[Optional[str], Field(description="Overall risk: none / low / medium / high.")] = None
+    flags: Annotated[Optional[Any], Field(description="Reasons it was flagged (typosquat, install script, …).")] = None
+    advisories: Annotated[Optional[Any], Field(description="Matching OSV malware/vulnerability advisories.")] = None
+    verdict: Annotated[Optional[str], Field(description="One-line human verdict.")] = None
+    recommendation: Optional[str] = None
+
+
+class CommandCheck(_Out):
+    danger: Annotated[Optional[str], Field(description="Danger level: none / low / high / critical.")] = None
+    hits: Annotated[Optional[Any], Field(description="Matched destructive/RCE patterns with severity + reason.")] = None
+    verdict: Optional[str] = None
+    recommendation: Optional[str] = None
+
+
+class SecretScan(_Out):
+    leaked: Annotated[Optional[bool], Field(description="True if any secret was found.")] = None
+    findings: Annotated[Optional[Any], Field(description="Each leak: type, line, redacted value.")] = None
+    verdict: Optional[str] = None
+    recommendation: Optional[str] = None
+
+
+class ProjectScan(_Out):
+    risk: Annotated[Optional[str], Field(description="Overall risk: none / low / medium / high / critical.")] = None
+    findings: Annotated[Optional[Any], Field(description="Each issue: file, line, why, and the fix.")] = None
+    scanned_files: Annotated[Optional[int], Field(description="How many files were scanned.")] = None
+    verdict: Optional[str] = None
+    recommendation: Optional[str] = None
 
 
 def _ann(title: str, open_world: bool = False) -> ToolAnnotations:
@@ -60,7 +98,7 @@ def check_package(
     ecosystem: Annotated[str, Field(description="Package registry: 'pypi' or 'npm'.")] = "pypi",
     version: Annotated[Optional[str], Field(description="Specific version to check (optional; omit for "
                                                         "the latest).")] = None,
-) -> dict:
+) -> PackageCheck:
     """Is a package SAFE to install? Call this before `pip install` / `npm install` / adding any
     dependency. Checks: does it actually exist on the registry (a hallucinated name is a red flag),
     is it a TYPOSQUAT of a popular package, does it RUN CODE ON INSTALL (npm pre/post-install scripts
@@ -75,7 +113,7 @@ def check_package(
 @mcp.tool(annotations=_ann("Check a shell command before running"))
 def check_command(
     command: Annotated[str, Field(description="The full shell command line you're about to run.")],
-) -> dict:
+) -> CommandCheck:
     """Is a shell command DESTRUCTIVE or a remote-code-exec vector? Call this before running any
     shell command you're not 100% sure about. Flags recursive force-deletes of root/home, disk wipes
     (dd/mkfs), pipe-to-shell (curl … | bash), fork bombs, force-push, hard-reset, sudo, DROP TABLE,
@@ -90,7 +128,7 @@ def check_command(
 def scan_secrets(
     text: Annotated[str, Field(description="The text/code/config to scan for API keys, tokens, or private "
                                            "keys before you commit, paste, log, or output it.")],
-) -> dict:
+) -> SecretScan:
     """Does this text/code LEAK a secret? Call this before you commit, paste, log, or output code or
     config. Detects API keys (AWS/OpenAI/Anthropic/Google/Stripe/GitHub/Slack), private-key blocks,
     JWTs, and generic `password=/api_key=` assignments — returns each finding (type, line, redacted).
@@ -104,7 +142,7 @@ def scan_secrets(
 def scan_project(
     path: Annotated[str, Field(description="Path to the backend to scan — a project directory or a single "
                                            ".py file.")],
-) -> dict:
+) -> ProjectScan:
     """Does a web/API backend have a money-losing security bug? Call this before you DEPLOY or SHIP a
     service you wrote or edited (a directory or a single .py file). Finds the logic holes a secret- or
     command-scanner can't see: auth that FAILS OPEN when a secret is unset, payment webhooks that don't
