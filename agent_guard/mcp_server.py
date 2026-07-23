@@ -162,6 +162,14 @@ if os.environ.get("AGENT_GUARD_HTTP") != "1":
     scan_project = mcp.tool(annotations=_ann("Scan a web backend before shipping"))(scan_project)
 
 
+# Stateful behavioural-guard tools (guard_begin / guard_step / guard_review) — the cross-call exfil +
+# injection-consequence layer a per-step check can't do. Registered from session.py so that module owns
+# its own wiring and this file stays merge-clean. Safe on the public HTTP transport: sessions are
+# in-process, LRU-capped, and every tool is pure computation over the caller's own reported actions.
+from .session import register_session_tools
+register_session_tools(mcp, ToolAnnotations)
+
+
 def main():
     mcp.run()
 
