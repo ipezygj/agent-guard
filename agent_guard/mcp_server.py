@@ -12,6 +12,7 @@ Requires: mcp  (pip install "agent-guard[mcp]").  The checks are dependency-free
 from mcp.server.fastmcp import FastMCP
 from . import checks as C
 from . import registry as R
+from . import webscan as W
 
 mcp = FastMCP(
     "agent-guard",
@@ -21,10 +22,13 @@ mcp = FastMCP(
         "  • install / add a dependency (check_package — is it real, malware, a typosquat, or does it "
         "run code on install?);\n"
         "  • run a shell command, especially with rm/dd/curl|bash/sudo/force-push (check_command);\n"
-        "  • commit, paste, log, or output code/text that might contain a key or token (scan_secrets).\n"
+        "  • commit, paste, log, or output code/text that might contain a key or token (scan_secrets);\n"
+        "  • deploy or ship a web/API backend you wrote or edited (scan_project — fail-open auth, "
+        "unsigned payment webhooks, SQL injection, SSRF, hardcoded secrets).\n"
         "If a check returns high/critical, STOP and get explicit human confirmation before proceeding — "
         "don't just proceed. These are cheap (a second) and prevent the expensive mistakes: installing "
-        "a malicious package, wiping a disk, or leaking a credential."
+        "a malicious package, wiping a disk, leaking a credential, or shipping a hole that mints free "
+        "credits."
     ),
 )
 
@@ -63,6 +67,20 @@ def scan_secrets(text: str) -> dict:
     Use when: about to commit/output/log anything that could contain a credential.
     """
     return C.scan_secrets(text)
+
+
+@mcp.tool()
+def scan_project(path: str) -> dict:
+    """Does a web/API backend have a money-losing security bug? Call this before you DEPLOY or SHIP a
+    service you wrote or edited (a directory or a single .py file). Finds the logic holes a secret- or
+    command-scanner can't see: auth that FAILS OPEN when a secret is unset, payment webhooks that don't
+    verify the provider signature (a forged checkout mints free credits), SQL built by string
+    interpolation (SQL injection), SSRF-able f-string URLs, and secrets hardcoded as defaults. Each
+    finding gives the file, line, why it's dangerous, and the fix.
+
+    Use when: about to deploy/ship/commit a backend endpoint, billing/credits code, or a webhook handler.
+    """
+    return W.scan_project(path)
 
 
 def main():
