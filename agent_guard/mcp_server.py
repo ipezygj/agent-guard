@@ -10,12 +10,22 @@ Run:  python -m agent_guard.mcp_server        (stdio MCP server)
 Requires: mcp  (pip install "agent-guard[mcp]").  The checks are dependency-free.
 """
 import os
+from typing import Annotated, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
+from pydantic import Field
 from . import checks as C
 from . import registry as R
 from . import webscan as W
+
+
+def _ann(title: str, open_world: bool = False) -> ToolAnnotations:
+    """These checks inspect and report; they don't modify the caller's world and are deterministic —
+    read-only, non-destructive, idempotent. `open_world` = does it reach external services (a registry)?"""
+    return ToolAnnotations(title=title, readOnlyHint=True, destructiveHint=False,
+                           idempotentHint=True, openWorldHint=open_world)
 
 # DNS-rebinding protection guards LOCALHOST servers; this ships as a PUBLIC HTTP MCP server (Render/Smithery),
 # and every tool is pure, read-only computation with no local/privileged access — so the Host allowlist would
@@ -44,8 +54,13 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
-def check_package(name: str, ecosystem: str = "pypi", version: str = None) -> dict:
+@mcp.tool(annotations=_ann("Check a package before installing", open_world=True))
+def check_package(
+    name: Annotated[str, Field(description="The package name to check, exactly as you'd install it.")],
+    ecosystem: Annotated[str, Field(description="Package registry: 'pypi' or 'npm'.")] = "pypi",
+    version: Annotated[Optional[str], Field(description="Specific version to check (optional; omit for "
+                                                        "the latest).")] = None,
+) -> dict:
     """Is a package SAFE to install? Call this before `pip install` / `npm install` / adding any
     dependency. Checks: does it actually exist on the registry (a hallucinated name is a red flag),
     is it a TYPOSQUAT of a popular package, does it RUN CODE ON INSTALL (npm pre/post-install scripts
@@ -57,8 +72,10 @@ def check_package(name: str, ecosystem: str = "pypi", version: str = None) -> di
     return R.check_package(name, ecosystem=ecosystem, version=version)
 
 
-@mcp.tool()
-def check_command(command: str) -> dict:
+@mcp.tool(annotations=_ann("Check a shell command before running"))
+def check_command(
+    command: Annotated[str, Field(description="The full shell command line you're about to run.")],
+) -> dict:
     """Is a shell command DESTRUCTIVE or a remote-code-exec vector? Call this before running any
     shell command you're not 100% sure about. Flags recursive force-deletes of root/home, disk wipes
     (dd/mkfs), pipe-to-shell (curl … | bash), fork bombs, force-push, hard-reset, sudo, DROP TABLE,
@@ -69,8 +86,11 @@ def check_command(command: str) -> dict:
     return C.analyze_command(command)
 
 
-@mcp.tool()
-def scan_secrets(text: str) -> dict:
+@mcp.tool(annotations=_ann("Scan text for leaked secrets"))
+def scan_secrets(
+    text: Annotated[str, Field(description="The text/code/config to scan for API keys, tokens, or private "
+                                           "keys before you commit, paste, log, or output it.")],
+) -> dict:
     """Does this text/code LEAK a secret? Call this before you commit, paste, log, or output code or
     config. Detects API keys (AWS/OpenAI/Anthropic/Google/Stripe/GitHub/Slack), private-key blocks,
     JWTs, and generic `password=/api_key=` assignments — returns each finding (type, line, redacted).
@@ -80,8 +100,11 @@ def scan_secrets(text: str) -> dict:
     return C.scan_secrets(text)
 
 
-@mcp.tool()
-def scan_project(path: str) -> dict:
+@mcp.tool(annotations=_ann("Scan a web backend before shipping"))
+def scan_project(
+    path: Annotated[str, Field(description="Path to the backend to scan — a project directory or a single "
+                                           ".py file.")],
+) -> dict:
     """Does a web/API backend have a money-losing security bug? Call this before you DEPLOY or SHIP a
     service you wrote or edited (a directory or a single .py file). Finds the logic holes a secret- or
     command-scanner can't see: auth that FAILS OPEN when a secret is unset, payment webhooks that don't
