@@ -100,6 +100,7 @@ _DEFAULT_ALLOW = {
 _URL_HOST = re.compile(r'\b[a-z][a-z0-9+.-]*://([^/\s\'"\\]+)', re.IGNORECASE)      # scheme://host
 _SCP_HOST = re.compile(r'\b[\w.-]+@([\w.-]+):', re.IGNORECASE)                       # user@host:path
 _BARE_DOMAIN = re.compile(r'\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b', re.IGNORECASE)        # last-resort host
+_IPV4 = re.compile(r'(?<![\d.])\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.])')          # raw-IP egress host
 # A schemeless `curl example.com` is only treated as a host if its last label is a REAL TLD — otherwise
 # `build.tar` / `notes.txt` / `config.json` (filenames) get misread as exfil targets. Scheme:// and scp
 # hosts skip this gate (they're unambiguous), so an unusual TLD over https still works.
@@ -124,12 +125,17 @@ def _egress_targets(cmd: str, allow: set[str]) -> dict:
     for m in _SCP_HOST.finditer(cmd):
         hosts.append(m.group(1))
     # bare `curl example.com/x` with no scheme — only trust a bare domain if an egress tool is present,
-    # to avoid matching a domain that's just mentioned in a comment/string.
+    # to avoid matching a domain that's just mentioned in a comment/string. Raw IPs (schemeless curl,
+    # `nc 1.2.3.4 4444`) are a top exfil channel and carry no TLD, so match them separately, same gate.
     if _EGRESS_TOOL.search(cmd):
         for m in _BARE_DOMAIN.finditer(cmd):
             h = m.group(1)
             if h not in hosts and h.rsplit(".", 1)[-1].lower() in _COMMON_TLD:
                 hosts.append(h)
+        for m in _IPV4.finditer(cmd):
+            ip = m.group(0)
+            if ip not in hosts and all(0 <= int(o) <= 255 for o in ip.split(".")):
+                hosts.append(ip)
     seen, sinks, bad, good = set(), [], [], []
     for h in hosts:
         key = h.lower()

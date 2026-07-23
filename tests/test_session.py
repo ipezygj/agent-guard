@@ -126,3 +126,16 @@ def test_sideeffect_tool_only_flagged_after_untrusted():
     assert v["decision"] == "block" and v["severity"] == "critical"
     # snake_case tool names must match (transfer_funds, not just 'transfer')
     assert any("transfer_funds" in r for r in v["reasons"])
+
+
+def test_redteam_no_unexpected_bypass():
+    # adversarial generator (arsenal agent_redteam ported): across ~1000 mutated attack traces the guard
+    # must have ZERO unexpected bypasses (100% hold on traces with an observable malicious signal) and
+    # ZERO false positives on mutated benign traces. The only misses allowed are the two NAMED structural
+    # limits (allowlisted-host exfil, invisible-secret via variable indirection), bucketed as known_limit.
+    from agent_guard.redteam import run
+    r = run(verbose=False)
+    assert r["total"] > 500                         # the generator actually enumerated a real space
+    assert r["bypass"] == 0, f"unexpected bypasses: {r['bypasses'][:10]}"
+    assert r["hold"] == 1.0
+    assert r["fp"] == 0, f"false positives under mutation: {r['fps'][:10]}"
