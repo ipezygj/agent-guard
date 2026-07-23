@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# PyPI name is "agent-tripwire" ("agent-guard" was taken); import package + MCP server stay agent_guard.
+[project]
+name = "agent-tripwire"
+version = "0.1.0"
+description = "Safety checks an AI agent runs before it acts: is this package malware/typosquat, is this shell command destructive, does this text leak a secret. CLI + MCP server."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Ilpo Vaatainen" }]
+keywords = ["ai-agents", "agent-tools", "mcp", "model-context-protocol", "security",
+            "supply-chain", "typosquat", "secrets", "guardrails", "safety", "llm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Security",
+    "Intended Audience :: Developers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+
+[project.urls]
+Source = "https://github.com/ipezygj/agent-guard"
+
+[project.scripts]
+agent-guard-mcp = "agent_guard.mcp_server:main"
+
+[tool.setuptools]
+packages = ["agent_guard"]
