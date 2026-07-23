@@ -5,10 +5,14 @@ supply-chain / Lazarus-style malware vector), and is it in a known-vulnerability
 (OSV). Stdlib urllib only; every call is best-effort (returns a note on failure, never crashes).
 """
 import json
+import re
 import urllib.request, urllib.parse, urllib.error
 from .checks import typosquat_check
 
 _UA = {"User-Agent": "agent-guard", "Accept": "application/json"}
+# a real package name only — refuse anything else BEFORE building a URL (no SSRF / path traversal /
+# header injection via a malicious "name"). Allows npm scopes (@scope/name).
+_SAFE_NAME = re.compile(r'^@?[A-Za-z0-9][A-Za-z0-9._-]{0,100}(/[A-Za-z0-9][A-Za-z0-9._-]{0,100})?$')
 
 
 def _get(url, timeout=12):
@@ -71,6 +75,11 @@ def _osv(name, ecosystem):
 
 def check_package(name: str, ecosystem: str = "pypi", version: str = None) -> dict:
     """Combine typosquat + registry + OSV into one verdict for a package the agent is about to install."""
+    name = (name or "").strip()
+    if not _SAFE_NAME.match(name) or ".." in name:
+        return {"package": name[:80], "ecosystem": ecosystem, "risk": "invalid", "flags": [],
+                "verdict": "Not a valid package name — refusing to look it up.",
+                "recommendation": "This isn't a well-formed package name; do not install it."}
     flags = []
     ts = typosquat_check(name, ecosystem)
     if ts.get("typosquat"):

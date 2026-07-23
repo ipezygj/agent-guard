@@ -37,6 +37,7 @@ _SEV = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}
 
 
 def analyze_command(cmd: str) -> dict:
+    cmd = (cmd or "")[:4000]          # cap input (DoS guard; real commands are short)
     hits = []
     for sev, pat, why in _CMD_RULES:
         if re.search(pat, cmd, re.I):
@@ -74,6 +75,7 @@ def _redact(s: str) -> str:
 
 
 def scan_secrets(text: str) -> dict:
+    text = (text or "")[:200_000]     # cap input (DoS guard on a huge blob)
     found = []
     for name, pat in _SECRETS:
         for m in re.finditer(pat, text):
