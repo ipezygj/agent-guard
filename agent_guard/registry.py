@@ -42,9 +42,11 @@ def _pypi(name):
         return {"exists": code != 404, "reachable": code is not None}
     releases = d.get("releases", {})
     dates = [f["upload_time"] for v in releases.values() for f in v if f.get("upload_time")]
+    # scripts=None (not False): pip runs setup.py on install, but the PyPI JSON API can't expose it,
+    # so we honestly can't verify pypi install-time code execution (unlike npm's declared scripts).
     return {"exists": True, "reachable": True, "n_releases": len(releases),
             "first_release": min(dates) if dates else None,
-            "scripts": False, "summary": (d.get("info", {}).get("summary") or "")[:120]}
+            "scripts": None, "summary": (d.get("info", {}).get("summary") or "")[:120]}
 
 
 def _npm(name):
@@ -61,9 +63,12 @@ def _npm(name):
             "scripts": bool(install_hooks), "install_hooks": install_hooks}
 
 
-def _osv(name, ecosystem):
+def _osv(name, ecosystem, version=None):
     eco = {"pypi": "PyPI", "npm": "npm"}.get(ecosystem, ecosystem)
-    d, _ = _post("https://api.osv.dev/v1/query", {"package": {"name": name, "ecosystem": eco}})
+    query = {"package": {"name": name, "ecosystem": eco}}
+    if version:                         # narrow to advisories affecting the specific version
+        query["version"] = str(version)
+    d, _ = _post("https://api.osv.dev/v1/query", query)
     if not d:
         return []
     out = []
@@ -95,11 +100,15 @@ def check_package(name: str, ecosystem: str = "pypi", version: str = None) -> di
         if meta.get("scripts"):
             flags.append(("HIGH", f"Runs code on install ({', '.join(meta.get('install_hooks', {}))}) — "
                                   "the classic supply-chain execution vector. Inspect those scripts."))
+        elif ecosystem == "pypi" and meta.get("scripts") is None:
+            flags.append(("INFO", "pip runs setup.py on install and the PyPI API can't expose it — "
+                                  "agent-guard can't verify install-time code for pypi; review setup.py "
+                                  "for a package you don't fully trust."))
         if meta.get("n_releases", 99) <= 2 and meta.get("first_release"):
             flags.append(("MEDIUM", f"Very new / few releases (first: {meta['first_release'][:10]}) — "
                                     "unusual for a dependency you'd trust; extra caution if it mimics a popular name."))
 
-    advisories = _osv(name, ecosystem)
+    advisories = _osv(name, ecosystem, version)
     malware = [a for a in advisories if a["malware"]]
     vulns = [a for a in advisories if not a["malware"]]
     for a in malware:
