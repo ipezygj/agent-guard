@@ -121,13 +121,22 @@ def scan_project(path: str, max_files: int = 400) -> dict:
     if p.is_file():
         files = [p]
     else:
-        files = [f for f in p.rglob("*.py")
-                 if "test" not in f.name.lower() and "site-packages" not in str(f)
-                 and ".venv" not in str(f) and "node_modules" not in str(f)][:max_files]
+        files = []
+        for f in p.rglob("*.py"):        # stream + stop at the cap — never materialize the whole tree
+            s = str(f)
+            if ("test" in f.name.lower() or "site-packages" in s
+                    or ".venv" in s or "node_modules" in s):
+                continue
+            files.append(f)
+            if len(files) >= max_files:
+                break
     findings = []
     for f in files:
         try:
-            src = f.read_text(encoding="utf-8", errors="ignore")
+            if not f.is_file() or f.is_symlink():   # skip symlinks / non-regular (device/fifo) files
+                continue
+            with f.open("rb") as fh:                # bounded read — never load a huge file into memory
+                src = fh.read(_MAX_SRC).decode("utf-8", errors="ignore")
         except Exception:
             continue
         rel = str(f.relative_to(p)) if p.is_dir() else str(f)

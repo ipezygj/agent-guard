@@ -138,7 +138,6 @@ def scan_secrets(
     return C.scan_secrets(text)
 
 
-@mcp.tool(annotations=_ann("Scan a web backend before shipping"))
 def scan_project(
     path: Annotated[str, Field(description="Path to the backend to scan — a project directory or a single "
                                            ".py file.")],
@@ -153,6 +152,14 @@ def scan_project(
     Use when: about to deploy/ship/commit a backend endpoint, billing/credits code, or a webhook handler.
     """
     return W.scan_project(path)
+
+
+# scan_project reads the *server's* filesystem. That's exactly right for a LOCAL/stdio agent scanning its own
+# project, but on a PUBLIC HTTP server (AGENT_GUARD_HTTP=1) it would be an unauthenticated arbitrary-file-read
+# and filesystem-enumeration primitive against the host — and semantically useless (it can't see the caller's
+# files). So it is registered ONLY off the HTTP transport. The other three tools are pure, input-bounded checks.
+if os.environ.get("AGENT_GUARD_HTTP") != "1":
+    scan_project = mcp.tool(annotations=_ann("Scan a web backend before shipping"))(scan_project)
 
 
 def main():
