@@ -17,17 +17,20 @@ from pathlib import Path
 _SECRET_WORD = r'(?:SECRET|API[_-]?KEY|TOKEN|PASSWORD|PRIVATE[_-]?KEY|WEBHOOK)'
 
 # secret vars read from env with an EMPTY default (the ones a fail-open check keys on)
-_ENV_SECRET = re.compile(rf'(\w*{_SECRET_WORD}\w*)\s*=\s*os\.environ\.get\(\s*["\'][^"\']*["\']\s*(?:,\s*["\']["\']\s*)?\)', re.I)
+# NOTE: every variable-length class below is BOUNDED ({0,N}) not unbounded (*) — an unbounded
+# `[^"']*`/`[^\n]*` that can fail late backtracks O(n²) on one long line and DoSes the scanner
+# (a crafted source file would hang it). Bounds keep every regex effectively linear.
+_ENV_SECRET = re.compile(rf'(\w{{0,40}}{_SECRET_WORD}\w{{0,40}})\s*=\s*os\.environ\.get\(\s*["\'][^"\']{{0,200}}["\']\s*(?:,\s*["\']["\']\s*)?\)', re.I)
 # secret read from env with a NON-EMPTY hardcoded default = a real fallback credential in the source
-_INSECURE_DEFAULT = re.compile(rf'os\.environ\.get\(\s*["\'][^"\']*{_SECRET_WORD}[^"\']*["\']\s*,\s*["\']([^"\']{{6,}})["\']\s*\)', re.I)
+_INSECURE_DEFAULT = re.compile(rf'os\.environ\.get\(\s*["\'][^"\']{{0,80}}{_SECRET_WORD}[^"\']{{0,80}}["\']\s*,\s*["\']([^"\']{{6,200}})["\']\s*\)', re.I)
 # `if SECRET and <cmp>` — enforcement gated on the secret being set (fails OPEN when unset)
-_FAIL_OPEN = re.compile(r'\bif\s+(?:not\s+)?(\w+)\s+and\b[^\n:]*(?:!=|==)', re.I)
+_FAIL_OPEN = re.compile(r'\bif\s+(?:not\s+)?(\w+)\s+and\b[^\n:]{0,200}(?:!=|==)', re.I)
 # fetch primitive with an f-string URL that interpolates a variable
-_SSRF = re.compile(r'\b(?:urlopen|urlretrieve|Request|requests\.(?:get|post|put|delete)|httpx\.(?:get|post|put))\s*\(\s*f["\']https?://[^"\']*\{', re.I)
+_SSRF = re.compile(r'\b(?:urlopen|urlretrieve|Request|requests\.(?:get|post|put|delete)|httpx\.(?:get|post|put))\s*\(\s*f["\']https?://[^"\']{0,300}\{', re.I)
 # SQL built by interpolation rather than parameterized
-_SQL = re.compile(r'\.execute(?:script)?\s*\(\s*(?:f["\']|["\'][^"\']*["\']\s*%|["\'][^"\']*["\']\s*\+|["\'][^"\']*\{[^}]+\})', re.I)
+_SQL = re.compile(r'\.execute(?:script)?\s*\(\s*(?:f["\']|["\'][^"\']{0,300}["\']\s*%|["\'][^"\']{0,300}["\']\s*\+|["\'][^"\']{0,300}\{[^}]{1,200}\})', re.I)
 # a secret-named var interpolated into a returned / raised / logged string
-_SECRET_LEAK = re.compile(rf'(?:return|raise|HTTPException|log(?:ger)?\.\w+|print)\b[^\n]*f["\'][^"\']*\{{[^}}]*{_SECRET_WORD}[^}}]*\}}', re.I)
+_SECRET_LEAK = re.compile(rf'(?:return|raise|HTTPException|log(?:ger)?\.\w+|print)\b[^\n]{{0,300}}f["\'][^"\']{{0,200}}\{{[^}}]{{0,200}}{_SECRET_WORD}[^}}]{{0,200}}\}}', re.I)
 
 _SEV = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}
 
@@ -47,7 +50,11 @@ def _funcs(src):
     return out
 
 
+_MAX_SRC = 400_000   # cap scanned bytes per file — real source is far smaller; caps regex work
+
+
 def _scan_src(src, fn):
+    src = src[:_MAX_SRC]
     out = []
     env_secrets = {m.group(1) for m in _ENV_SECRET.finditer(src)}
 
@@ -140,51 +147,10 @@ def scan_project(path: str, max_files: int = 400) -> dict:
                                "Review each finding before shipping.")}
 
 
-def _selftest():
-    vuln = '''
-import os
-INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
-API_TOKEN = os.environ.get("API_TOKEN", "s3cr3t-default")
-def deduct(request, key):
-    if INTERNAL_SECRET and request.headers.get("x") != INTERNAL_SECRET:
-        raise Exception("no")
-    conn.execute(f"SELECT * FROM k WHERE key='{key}'")
-async def stripe_webhook(request):
-    payload = await request.body()
-    event = json.loads(payload)
-    add_credits(event["key"], event["credits"])
-def fetch(name):
-    return urlopen(f"https://pypi.org/pypi/{name}/json")
-'''
-    safe = '''
-import os, stripe
-INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
-def deduct(request, key):
-    if not INTERNAL_SECRET or request.headers.get("x") != INTERNAL_SECRET:
-        raise Exception("no")
-    conn.execute("SELECT * FROM k WHERE key=?", (key,))
-async def stripe_webhook(request):
-    payload = await request.body()
-    event = stripe.Webhook.construct_event(payload, sig, WEBHOOK_SECRET)
-    add_credits(event["key"], event["credits"])
-'''
-    import tempfile
-    d = Path(tempfile.mkdtemp())
-    (d / "vuln.py").write_text(vuln, encoding="utf-8")
-    (d / "safe.py").write_text(safe, encoding="utf-8")
-    v = scan_project(str(d / "vuln.py"))
-    s = scan_project(str(d / "safe.py"))
-    types = {f["type"] for f in v["findings"]}
-    expect = {"fail-open-auth", "webhook-no-verify", "insecure-default-secret", "sql-string-build", "ssrf-fstring-url"}
-    assert expect <= types, f"missing: {expect - types}"
-    assert v["risk"] == "critical"
-    assert s["risk"] == "clear" and not s["findings"], f"false positive on safe: {s['findings']}"
-    print("agent-guard webscan selftest: OK")
-
-
 if __name__ == "__main__":
     import sys, json
     if len(sys.argv) > 1 and sys.argv[1] != "--selftest":
         print(json.dumps(scan_project(sys.argv[1]), indent=2)[:2000])
     else:
-        _selftest()
+        from agent_guard._selftest_webscan import run
+        run()

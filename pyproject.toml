@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 # PyPI name is "agent-tripwire" ("agent-guard" was taken); import package + MCP server stay agent_guard.
 [project]
 name = "agent-tripwire"
-version = "0.2.0"
+version = "0.2.1"
 description = "Safety checks an AI agent runs before it acts: is this package malware/typosquat, is this shell command destructive, does this text leak a secret. CLI + MCP server."
 readme = "README.md"
 requires-python = ">=3.9"
