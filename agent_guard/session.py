@@ -161,6 +161,42 @@ def _worst(*sevs: str) -> str:
     return max(sevs, key=lambda s: _SEV_RANK.get(s, 0)) if sevs else "none"
 
 
+# --------------------------------------------------------------------------------------------------
+# Task alignment (#2) — the intent lens only an in-loop guard has: does this action have anything to
+# do with what the user asked? Kept DELIBERATELY conservative. Lexical overlap between a task sentence
+# and a shell command is weak (task "fix a failing test" legitimately runs "rm -rf build" with zero
+# shared words), so off-task is NEVER a standalone block — it only ADDS a note to an action already
+# flagged by the taint/injection rules ("…and it doesn't obviously match your task"). A real semantic
+# alignment check wants an LLM; this is the honest, false-positive-free floor.
+# --------------------------------------------------------------------------------------------------
+_STOP = {
+    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "with", "into", "from", "this",
+    "that", "it", "is", "are", "be", "please", "then", "so", "my", "our", "your", "me", "we",
+    "fix", "run", "make", "do", "add", "update", "change", "set", "get", "use", "help", "want",
+    "need", "can", "will", "should", "just", "new", "some", "all", "any", "up", "out",
+}
+_WORD = re.compile(r'[a-z0-9]{3,}')
+
+
+def _content_tokens(s: str) -> set[str]:
+    toks = set()
+    for w in _WORD.findall((s or "").lower()):
+        if w not in _STOP:
+            toks.add(w)
+            if w.endswith("s") and len(w) > 4:   # crude singular/plural fold
+                toks.add(w[:-1])
+    return toks
+
+
+def _task_related(command: str, task: str) -> bool:
+    """True if the command shares any content token with the task (path basenames, subcommands, hosts
+    count). Empty task ⇒ always 'related' (nothing to compare against, so never penalise)."""
+    t = _content_tokens(task)
+    if not t:
+        return True
+    return bool(t & _content_tokens(command))
+
+
 class GuardSession:
     """A live behavioural guard for ONE agent run. Feed it every risky action, in order, BEFORE the
     agent executes it. Each `observe_*` returns a verdict for that step *in light of everything seen
@@ -305,7 +341,14 @@ class GuardSession:
                     f"Destructive command AFTER ingesting untrusted content from '{u['origin']}' "
                     f"(step {u['step']}) — verify the agent, not the fetched text, decided to run this.")
 
+        # (e) TASK-ALIGNMENT NOTE — only sharpens an already-flagged action; never blocks on its own.
         decision = _DECISION[_SEV_RANK[sev]]
+        if decision != "allow" and self.task and not _task_related(cmd, self.task):
+            reasons.append(
+                f"…and this command shares nothing with the stated task (\"{self.task[:100]}\") — an "
+                f"off-task risky action is exactly what an injected/confused agent does. Double-check "
+                f"the agent actually needs to run this for the task.")
+
         rec = self._recommend(decision, sev)
         return self._record("command", cmd, decision, sev, reasons or ["No cross-step risk detected."],
                             chain, rec)
@@ -362,6 +405,17 @@ class GuardSession:
                         else "Clean run — no cross-step risk observed."),
             "trace": self.steps,
         }
+
+    def signed_receipt(self, private_hex: Optional[str] = None, public_hex: Optional[str] = None,
+                       ttl_seconds: Optional[int] = None) -> dict:
+        """Issue a portable, tamper-evident receipt of THIS run's verdict — the provable-compliance
+        artifact ("this agent run was guarded, here's the signed verdict"). Uses the given issuer key,
+        else a persistent local one. Same format as numguard, so it verifies on the same rail; the
+        paid/metered issuance path runs through numguard (see the monetisation plan)."""
+        from . import receipt as _r
+        if not private_hex:
+            private_hex, public_hex = _r.load_or_create_issuer()
+        return _r.issue_receipt(self.summary(), private_hex, public_hex or "", ttl_seconds)
 
 
 def evaluate_sequence(actions: list[dict], task: Optional[str] = None,
@@ -462,6 +516,20 @@ def register_session_tools(mcp, ToolAnnotations=None) -> None:
         if s is None:
             return {"overall": "error", "verdict": f"Unknown session_id '{session_id}'."}
         return s.summary()
+
+    @_tool
+    def guard_receipt(session_id: str) -> dict:
+        """Issue a portable, tamper-evident RECEIPT of a session's verdict — cryptographic proof the run
+        was guarded and what the guard decided. A downstream agent or human verifies it with only the
+        public key (no trust in the caller). Attach it to the agent's output as evidence of a guarded run.
+
+        Use when: you need to PROVE an agent run passed the behavioural guard — compliance, audit, or
+        handing verified work to another party.
+        """
+        s = _SESSIONS.get(session_id)
+        if s is None:
+            return {"error": f"Unknown session_id '{session_id}'. Call guard_begin first."}
+        return s.signed_receipt()
 
 
 if __name__ == "__main__":
