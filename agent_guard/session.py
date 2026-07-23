@@ -148,6 +148,21 @@ def _egress_targets(cmd: str, allow: set[str]) -> dict:
     return {"sinks": sinks, "un_allowlisted": bad, "allowlisted": good, "has_egress_tool": bool(_EGRESS_TOOL.search(cmd))}
 
 
+# Irreversible SIDE-EFFECT tools — vocabulary ported from the audit arsenal's agent_lens (its #1
+# agentic class, SIDEEFFECT-NOCONFIRM). A prompt-injected/hijacked agent invoking one of these
+# autonomously is the dominant agent attack. Split money (worse — irreversible funds) from booking/comms.
+# NOTE the boundary: (?<![a-z])…(?![a-z]) not \b…\b, because tool names are snake_case — `\btransfer\b`
+# does NOT match "transfer_funds" (underscore is a word-char, so no boundary). This treats an underscore
+# as a separator, so a keyword that is one component of a snake_case tool name still matches.
+_SIDEEFFECT_MONEY = re.compile(
+    r'(?i)(?<![a-z])(pay|payment|charge|refund|payout|transfer|withdraw|wire|remit|settle|'
+    r'capture_payment|issue_refund|chargeback|disburse|send_funds|make_payment)(?![a-z])')
+_SIDEEFFECT_OTHER = re.compile(
+    r'(?i)(?<![a-z])(book|booking|reserve|reservation|rebook|cancel|cancellation|checkout|place_order|'
+    r'issue_ticket|confirm_order|modify_booking|update_reservation|redeem|award_points|send_email|'
+    r'send_sms|send_message|post_message|delete|deploy|merge_pr|publish)(?![a-z])')
+
+
 def _sensitive_hits(text: str) -> list[str]:
     out, seen = [], set()
     for rx, lbl in _SENSITIVE_SOURCE:
@@ -287,6 +302,40 @@ class GuardSession:
                             [f"{what} is now in the agent's context — later outbound calls are watched."],
                             [], "Proceed; do not transmit this off-box to a non-allowlisted host.")
 
+    def observe_tool_call(self, name: str, args: str = "") -> dict:
+        """The agent is about to invoke a named tool/function (not a shell command) — e.g. pay(),
+        send_email(), book(), transfer(). A bare side-effect call is NORMAL (agents legitimately pay and
+        book); the attack — the arsenal's #1 agentic class (SIDEEFFECT-NOCONFIRM) — is an irreversible
+        side-effect tool invoked AUTONOMOUSLY right after ingesting untrusted content, i.e. a prompt-
+        injected agent acting on the attacker's instruction. So: bare = allow, side-effect-after-untrusted
+        = block."""
+        text = f"{name} {args}".strip()
+        money = bool(_SIDEEFFECT_MONEY.search(text))
+        other = bool(_SIDEEFFECT_OTHER.search(text))
+        reasons, sev, chain = [], "none", []
+        if money or other:
+            lbl = "money/settlement" if money else "booking/comms/irreversible"
+            if self.ingested_untrusted:
+                u = self._untrusted[-1]
+                sev = "critical" if money else "high"
+                chain = sorted({u["step"], len(self.steps)})
+                reasons.append(
+                    f"Irreversible {lbl} tool '{name}' invoked AFTER ingesting untrusted content from "
+                    f"'{u['origin']}' (step {u['step']}). A prompt-injected agent autonomously calling a "
+                    f"side-effect tool is the #1 agentic attack — confirm a human approved THIS action, "
+                    f"not the fetched/retrieved text.")
+            else:
+                sev = "low"
+                reasons.append(
+                    f"Side-effect tool '{name}' ({lbl}) — fine if the user/task intends it; make sure a "
+                    f"human confirms irreversible money/booking actions rather than the agent deciding alone.")
+        decision = _DECISION[_SEV_RANK[sev]]
+        if decision != "allow" and self.task and not _task_related(text, self.task):
+            reasons.append(f"…and '{name}' shares nothing with the stated task (\"{self.task[:100]}\").")
+        rec = self._recommend(decision, sev)
+        return self._record("tool_call", text, decision, sev, reasons or ["Not a side-effect tool; proceed."],
+                            chain, rec)
+
     def observe_command(self, command: str) -> dict:
         """The heart of it: a shell command judged against BOTH its own danger and the session state."""
         cmd = command or ""
@@ -374,6 +423,9 @@ class GuardSession:
             return self.observe_fetch(action.get("url") or action.get("value", ""))
         if k in ("network", "egress", "connect", "post"):
             return self.observe_network(action.get("target") or action.get("url") or action.get("value", ""))
+        if k in ("tool_call", "tool", "action", "invoke", "call"):
+            return self.observe_tool_call(action.get("name") or action.get("tool") or action.get("value", ""),
+                                          action.get("args", ""))
         if k == "untrusted":
             return self.observe_untrusted(action.get("origin", "external"))
         if k in ("secret", "credential"):

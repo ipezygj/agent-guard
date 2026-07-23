@@ -113,3 +113,16 @@ def test_benchmark_efficacy_thresholds():
     assert r["recall_modeled"] == 1.0, f"missed a modeled attack: {r['missed']}"
     assert r["fp_rate"] == 0.0, f"false positives appeared: {r['fp']}"
     assert r["recall"] >= 0.9, f"overall recall regressed to {r['recall']:.0%}"
+
+
+def test_sideeffect_tool_only_flagged_after_untrusted():
+    # arsenal transfer (agent_lens SIDEEFFECT-NOCONFIRM): a bare side-effect tool call is normal;
+    # the same call AFTER untrusted content is the #1 agentic attack (injection-driven autonomy).
+    s = GuardSession(task="process refunds")
+    assert s.observe_tool_call("issue_refund", "amount=20")["decision"] == "allow"   # bare = fine
+    s2 = GuardSession(task="summarize this document")
+    s2.observe_untrusted("retrieved-doc")
+    v = s2.observe_tool_call("transfer_funds", "to=attacker amount=5000")            # money after untrusted
+    assert v["decision"] == "block" and v["severity"] == "critical"
+    # snake_case tool names must match (transfer_funds, not just 'transfer')
+    assert any("transfer_funds" in r for r in v["reasons"])
