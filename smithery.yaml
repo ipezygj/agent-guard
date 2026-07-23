@@ -1,0 +1,8 @@
+# Smithery MCP registry manifest — https://smithery.ai
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+  commandFunction: |-
+    (config) => ({ command: "agent-guard-mcp", args: [] })
