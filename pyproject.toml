@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 # PyPI name is "agent-tripwire" ("agent-guard" was taken); import package + MCP server stay agent_guard.
 [project]
 name = "agent-tripwire"
-version = "0.2.1"
-description = "Safety checks an AI agent runs before it acts: is this package malware/typosquat, is this shell command destructive, does this text leak a secret. CLI + MCP server."
+version = "0.3.0"
+description = "Safety checks an AI agent runs before it acts: is this package malware/typosquat, is this shell command destructive, does this text leak a secret — plus a stateful behavioural guard that catches cross-call exfiltration chains and prompt-injection consequences, with portable signed receipts. CLI + MCP server."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -23,6 +23,8 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
+# publicly-verifiable Ed25519 receipts; without it, receipts fall back to HMAC (verifier needs the secret)
+receipt = ["cryptography>=41"]
 
 [project.urls]
 Source = "https://github.com/ipezygj/agent-guard"
