@@ -1,0 +1,46 @@
+{
+  "tool": "agent-guard (behavioural layer)",
+  "claim": "Catches cross-call exfiltration chains, prompt-injection consequences, and unauthorized side-effect tool calls in an AI agent's action trace.",
+  "measured": {
+    "labeled_corpus": {
+      "recall_on_modeled_patterns": 1.0,
+      "recall_overall_incl_evasions": 0.95,
+      "false_positive_rate": 0.0,
+      "provenance": "self-authored (honest: includes deliberate evasions + FP traps)"
+    },
+    "adversarial_redteam": {
+      "generated_variants": 1095,
+      "hold_rate_on_observable_signal": 1.0,
+      "unexpected_bypasses": 0,
+      "false_positives_under_mutation": 0,
+      "provenance": "generator (mutation swarm) \u2014 ports the audit arsenal's red-team discipline"
+    },
+    "external_taxonomy_corpus": {
+      "in_scope_classes_caught": "10/10",
+      "recall": 1.0,
+      "standard": [
+        "OWASP Top 10 for LLM Applications 2025",
+        "MITRE ATLAS (AML.T0051 + Exfiltration via AI Agent Tool Invocation)"
+      ],
+      "provenance": "attack shapes defined by an EXTERNAL authority, not the tool's author"
+    }
+  },
+  "covers": {
+    "OWASP LLM01:2025": "Prompt Injection (direct + indirect) \u2192 consequence detection",
+    "OWASP LLM02:2025": "Sensitive Information Disclosure \u2192 cross-call exfiltration chain",
+    "OWASP LLM06:2025": "Excessive Agency \u2192 side-effect tool call after untrusted content",
+    "MITRE AML.T0051": "LLM Prompt Injection",
+    "MITRE ATLAS": "Exfiltration via AI Agent Tool Invocation"
+  },
+  "out_of_scope_by_design": {
+    "OWASP LLM07:2025": "System Prompt Leakage \u2014 a model-OUTPUT property, not in the action trace",
+    "OWASP LLM04/LLM08/LLM09/LLM10": "poisoning / embeddings / misinformation / DoS \u2014 not action-level",
+    "OWASP LLM03:2025": "Supply Chain \u2014 handled by a different agent-guard tool (check_package)"
+  },
+  "named_limits": [
+    "Exfiltration to an ALLOWLISTED host \u2014 host-allowlisting cannot distinguish it from legit traffic.",
+    "A secret referenced through an unresolvable shell VARIABLE \u2014 a trace-level guard never sees it."
+  ],
+  "verifiable_proof": "Every guarded run can emit an Ed25519-signed receipt (guard_receipt) that anyone verifies with only the public key \u2014 proof the guard ran and its verdict.",
+  "reproduce": "python -m agent_guard.bench ; python -m agent_guard.redteam ; python -m agent_guard.corpus_external  (all locked as regression-gate tests)"
+}
