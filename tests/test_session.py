@@ -139,3 +139,12 @@ def test_redteam_no_unexpected_bypass():
     assert r["bypass"] == 0, f"unexpected bypasses: {r['bypasses'][:10]}"
     assert r["hold"] == 1.0
     assert r["fp"] == 0, f"false positives under mutation: {r['fps'][:10]}"
+
+
+def test_external_taxonomy_corpus():
+    # attacks grounded in OWASP LLM Top 10 (2025) + MITRE ATLAS — the action-level classes the
+    # behavioural guard claims to cover must all fire; out-of-scope classes must NOT be falsely claimed.
+    from agent_guard.corpus_external import run
+    r = run(verbose=False)
+    assert r["recall"] == 1.0, f"missed a catalogued in-scope class: {r['missed']}"
+    assert r["in_scope"] >= 8
