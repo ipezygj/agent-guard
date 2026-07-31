@@ -23,7 +23,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.2,<2"]   # 2.0 removed mcp.server.fastmcp, which mcp_server.py imports
 # publicly-verifiable Ed25519 receipts; without it, receipts fall back to HMAC (verifier needs the secret)
 receipt = ["cryptography>=41"]
 
