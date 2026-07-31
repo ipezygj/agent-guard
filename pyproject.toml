@@ -28,7 +28,9 @@ mcp = ["mcp>=1.2,<2"]   # 2.0 removed mcp.server.fastmcp, which mcp_server.py im
 receipt = ["cryptography>=41"]
 
 [project.urls]
+Homepage = "https://github.com/ipezygj/agent-guard"
 Source = "https://github.com/ipezygj/agent-guard"
+Issues = "https://github.com/ipezygj/agent-guard/issues"
 
 [project.scripts]
 agent-guard-mcp = "agent_guard.mcp_server:main"
